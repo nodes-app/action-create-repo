@@ -1,0 +1,49 @@
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Create Test Repository
+        uses: ./
+        with:
+          name: action-create-repo-test
+          owner: nodes-bot
+          description: This is a test
+          token: ${{ secrets.GH_ACCESS_TOKEN }}
+
+      - name: Wait
+        run: sleep 3
+
+      - name: Delete Test Repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: |
+          gh repo delete "nodes-bot/action-create-repo-test" --confirm
+
+      - name: Wait
+        run: sleep 3
+
+      - name: Create Test Repository From Template
+        uses: ./
+        with:
+          name: action-create-repo-test
+          owner: nodes-bot
+          description: This is a test
+          template: actions/javascript-action
+          cancel-initial-runs: true
+          delete-initial-runs: true
+          token: ${{ secrets.GH_ACCESS_TOKEN }}
+
+      - name: Wait
+        run: sleep 3
+
+      - name: Delete Test Repository
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: |
+          gh repo delete "nodes-bot/action-create-repo-test" --confirm
