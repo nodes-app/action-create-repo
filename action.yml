@@ -21,6 +21,10 @@ inputs:
   template:
     description: Template repository (owner/repo)
     required: false
+  clone:
+    description: Optionally clone the new repository
+    required: false
+    default: 'false'
   cancel-initial-runs:
     description: Cancel initial workflow runs
     required: true
@@ -37,6 +41,7 @@ inputs:
 runs:
   using: composite
   steps:
+
     - name: Create Repository
       id: create-repo
       shell: bash
@@ -74,6 +79,15 @@ runs:
           sleep 0.5
         done
         sleep 1
+
+    - name: Clone Repository
+      shell: bash
+      if: inputs.clone == 'true'
+      env:
+        NAME: ${{ inputs.name }}
+        OWNER: ${{ inputs.owner }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: gh repo clone "$OWNER/$NAME"
 
     - name: Count Push Workflows
       id: count-push-workflows

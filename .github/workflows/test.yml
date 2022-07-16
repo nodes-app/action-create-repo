@@ -4,6 +4,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+    
       - name: Checkout
         uses: actions/checkout@v3
       
@@ -34,6 +35,27 @@ jobs:
           owner: nodes-bot
           description: This is a test
           template: actions/javascript-action
+          cancel-initial-runs: true
+          delete-initial-runs: true
+          token: ${{ secrets.GH_ACCESS_TOKEN }}
+
+      - name: Wait
+        run: sleep 3
+
+      - name: Delete Test Repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: |
+          gh repo delete "nodes-bot/action-create-repo-test" --confirm
+
+      - name: Create and Clone Test Repository From Template
+        uses: ./
+        with:
+          name: action-create-repo-test
+          owner: nodes-bot
+          description: This is a test
+          template: actions/javascript-action
+          clone: true
           cancel-initial-runs: true
           delete-initial-runs: true
           token: ${{ secrets.GH_ACCESS_TOKEN }}
