@@ -35,8 +35,7 @@ jobs:
           owner: nodes-bot
           description: This is a test
           template: actions/javascript-action
-          cancel-initial-runs: true
-          delete-initial-runs: true
+          cancel-runs: true
           token: ${{ secrets.GH_ACCESS_TOKEN }}
 
       - name: Wait
@@ -59,8 +58,7 @@ jobs:
           description: This is a test
           template: actions/javascript-action
           clone: true
-          cancel-initial-runs: true
-          delete-initial-runs: true
+          cancel-runs: true
           token: ${{ secrets.GH_ACCESS_TOKEN }}
 
       - name: Wait

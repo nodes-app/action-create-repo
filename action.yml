@@ -25,14 +25,14 @@ inputs:
     description: Optionally clone the new repository
     required: false
     default: 'false'
-  cancel-initial-runs:
+  cancel-runs:
     description: Cancel initial workflow runs
     required: true
     default: 'false'
-  delete-initial-runs:
+  delete-runs:
     description: Delete initial workflow runs (after cancellation)
     required: true
-    default: 'false'
+    default: 'true'
   token:
     description: GitHub personal access token
     required: true
@@ -92,7 +92,7 @@ runs:
     - name: Count Push Workflows
       id: count-push-workflows
       shell: bash
-      if: inputs.template != '' && inputs.cancel-initial-runs == 'true'
+      if: inputs.template != '' && inputs.cancel-runs == 'true'
       env:
         TEMPLATE: ${{ inputs.template }}
         GITHUB_TOKEN: ${{ inputs.token }}
@@ -178,12 +178,12 @@ runs:
 
     - name: Cancel Initial Workflow Runs
       shell: bash
-      if: inputs.template != '' && inputs.cancel-initial-runs == 'true'
+      if: inputs.template != '' && inputs.cancel-runs == 'true'
       env:
         NAME: ${{ inputs.name }}
         OWNER: ${{ inputs.owner }}
         TEMPLATE: ${{ inputs.template }}
-        DELETE: ${{ inputs.delete-initial-runs }}
+        DELETE: ${{ inputs.delete-runs }}
         PUSH_WORKFLOW_COUNT: ${{ steps.count-push-workflows.outputs.count }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
