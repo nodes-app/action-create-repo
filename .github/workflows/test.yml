@@ -48,6 +48,9 @@ jobs:
         run: |
           gh repo delete "nodes-bot/action-create-repo-test" --confirm
 
+      - name: Wait
+        run: sleep 3
+
       - name: Create and Clone Test Repository From Template
         uses: ./
         with:

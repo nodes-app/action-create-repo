@@ -87,7 +87,7 @@ runs:
         NAME: ${{ inputs.name }}
         OWNER: ${{ inputs.owner }}
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: gh repo clone "$OWNER/$NAME"
+      run: git clone "https://$GITHUB_TOKEN@github.com/$OWNER/$NAME.git"
 
     - name: Count Push Workflows
       id: count-push-workflows
