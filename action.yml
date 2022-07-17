@@ -214,10 +214,12 @@ runs:
             --argjson push_workflow_ids "$PUSH_WORKFLOW_IDS" \
             '[
               .[] 
-              | .workflowDatabaseId as $workflow_id
               | select( 
                   .event == "push" 
-                  and (any($push_workflow_ids; . == $workflow_id))
+                  and (
+                    .workflowDatabaseId as $workflow_id
+                    | any($push_workflow_ids; . == $workflow_id)
+                  )
                 )
             ]'
         }
@@ -225,10 +227,19 @@ runs:
         cancellations_complete() {
           gh run list \
             --repo "$OWNER/$NAME" \
-            --json status,databaseId | \
+            --json status,databaseId,workflowDatabaseId | \
           jq \
-            '.[] | all(select( [.databaseId | tostring] | inside($ARGS.positional) ); .status == "completed" )' \
-            --args "$1"
+            '
+            .[] 
+            | all(
+                select(
+                  .databaseId as $id
+                  | any($run_ids; . == $id)
+                ); 
+                .status == "completed"
+              )
+            ' \
+            --argsjson run_ids "$1"
         }
         
         cancel_run() {
@@ -245,35 +256,37 @@ runs:
         push_workflow_count=$(echo "$PUSH_WORKFLOW_IDS" | jq length)
         timeout=10
         delay=2
-        cancelled=()
+        cancelled='[]'
         now=$(date +%s)
         last_cancellation=$now
-        while [[ $now < $(($last_cancellation + $timeout)) && ${#cancelled[@]} < $push_workflow_count  ]]; do
+        while [[ $now < $(($last_cancellation + $timeout)) && $(echo "$cancelled" | jq length) < $push_workflow_count  ]]; do
           runs=$(retry 5 list_runs)
           for (( i=0; i<$(echo "$runs" | jq length); i++ )); do
             run=$(echo "$runs" | jq --argjson i $i '.[$i]')
-            cancel_at=$(($(date -d "$(echo "$run" | jq -r '.createdAt')" +%s) + $delay))
-            if [[ ! " ${cancelled[*]} " =~ " $run_id " && $now > $cancel_at ]]; then
-              run_id=$(echo "$run" | jq -r '.databaseId')
-              retry 5 cancel_run $run_id
-              cancelled+=($run_id)
-              last_cancellation=$now
+            run_id=$(echo "$run" | jq -r '.databaseId')
+            if [[ ! "$(echo "$cancelled" | jq --argjson id "$run_id" 'any(. == $id)')" ]]; then
+              if [[ $now > $(($(date -d "$(echo "$run" | jq -r '.createdAt')" +%s) + $delay)) ]]; then
+                retry 5 cancel_run $run_id
+                cancelled=$(echo "$cancelled" | jq --argjson id "$run_id" '. += [$id]')
+                last_cancellation=$now
+              fi
             fi
           done
           sleep 0.5
           now=$(date +%s)
         done
         
-        run_ids=$(printf '%s ' "${cancelled[@]}" | xargs)
+        cancelled=$(echo "$cancelled" | jq -c)
         
         # Await run cancellation
-        while ! $(retry 5 cancellations_complete "'$run_ids'"); do
+        while ! $(retry 5 cancellations_complete "'$cancelled'"); do
           sleep 0.5
         done
         
         # Delete runs
         if $DELETE; then
-          for run_id in $run_ids; do
+          for (( i=0; i<$(echo "$cancelled" | jq length); i++ )); do
+            run_id=$(echo "$cancelled" | jq --argjson i $i '.[$i]')
             retry 5 delete_run $run_id
           done
         fi
