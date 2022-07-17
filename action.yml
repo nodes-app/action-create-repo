@@ -170,7 +170,7 @@ runs:
               push_workflow_ids=$(echo "$push_workflow_ids" | jq --argjson id "$(echo "$workflow" | jq '.id')" '. += [$id]')
             fi
           done
-          echo "$push_workflow_ids"
+          echo "$push_workflow_ids" | jq -c
         }
 
         push_workflow_ids=$(get_push_workflow_ids)
