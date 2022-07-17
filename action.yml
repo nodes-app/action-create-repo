@@ -209,7 +209,7 @@ runs:
         list_runs() {
           gh run list \
             --repo "$OWNER/$NAME" \
-            --json event,createdAt,databaseId,workflowDatabaseId | \
+            --json event,createdAt,databaseId,workflowDatabaseId,status | \
           jq \
             --argjson push_workflow_ids "$PUSH_WORKFLOW_IDS" \
             '
@@ -269,7 +269,9 @@ runs:
             run_id=$(echo "$run" | jq '.databaseId')
             if ! $(echo "$cancelled" | jq --argjson id "$run_id" 'any(. == $id)'); then
               if [[ $now > $(($(date -d "$(echo "$run" | jq -r '.createdAt')" +%s) + $delay)) ]]; then
-                retry 5 cancel_run $run_id
+                if [[ "$(echo "$run" | jq -r '.status')" != 'completed' ]]; then
+                  retry 5 cancel_run $run_id 
+                fi
                 cancelled=$(echo "$cancelled" | jq --argjson id "$run_id" '. += [$id]')
                 last_cancellation=$now
               fi
