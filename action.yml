@@ -239,7 +239,7 @@ runs:
                 .status == "completed"
               )
             ' \
-            --argsjson run_ids "$1"
+            --argjson run_ids "$1"
         }
         
         cancel_run() {
