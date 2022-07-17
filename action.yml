@@ -89,12 +89,13 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
       run: git clone "https://$GITHUB_TOKEN@github.com/$OWNER/$NAME.git"
 
-    - name: Count Push Workflows
-      id: count-push-workflows
+    - name: Identify Push Workflows
+      id: identify-push-workflows
       shell: bash
       if: inputs.template != '' && inputs.cancel-runs == 'true'
       env:
-        TEMPLATE: ${{ inputs.template }}
+        OWNER: ${{ inputs.owner }}
+        NAME: ${{ inputs.name }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
         retry() {
@@ -121,15 +122,14 @@ runs:
           echo "$(
             gh api \
               -H "Accept: application/vnd.github.v3+json" \
-              "/repos/$TEMPLATE/contents/$path" |
+              "/repos/$OWNER/$NAME/contents/$path" |
             jq -r '.content' |
             base64 -d
           )"
         }
 
         has_push_trigger () { 
-          local path="$1"
-          local content=$(retry 5 get_content "'$path'")
+          local content=$(retry 5 get_content "'$1'")
           local on=$(echo "$content" | yq '.on')
           local tag="$(echo "$on" | yq 'tag')"
           local has_push_trigger='false'
@@ -152,29 +152,29 @@ runs:
           
           echo "$has_push_trigger"
         }
-        
-        get_workflow_paths() {
-          echo "$(
-            gh api \
-              -H "Accept: application/vnd.github.v3+json" \
-              "/repos/$TEMPLATE/contents/.github/workflows" | \
-              jq -r '.[].path'
-          )"
-        }
-        
-        count_push_workflows() {
-          local workflow_paths=$(get_workflow_paths)
-          local push_workflow_count=0
-          for workflow_path in $workflow_paths; do
-            if $(has_push_trigger "$workflow_path"); then
-              ((push_workflow_count++))
-            fi
-          done
-          echo $push_workflow_count
+
+        get_workflows() {
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$OWNER/$NAME/actions/workflows" \
+            --jq '.workflows | map({ "id": .id, "path": .path })'
         }
 
-        push_workflow_count=$(count_push_workflows)
-        echo "::set-output name=count::$push_workflow_count"
+        get_push_workflow_ids() {
+          local workflows=$(get_workflows)
+          local push_workflow_ids='[]'
+          local workflow
+          for (( i=0; i<$(echo "$workflows" | jq length); i++ )); do
+            workflow=$(echo "$workflows" | jq --argjson i $i '.[$i]')
+            if "$(has_push_trigger "$(echo "$workflow" | jq -r '.path')")"; then
+              push_workflow_ids=$(echo "$push_workflow_ids" | jq --argjson id "$(echo "$workflow" | jq '.id')" '. += [$id]')
+            fi
+          done
+          echo "$push_workflow_ids"
+        }
+
+        push_workflow_ids=$(get_push_workflow_ids)
+        echo "::set-output name=push-workflow-ids::$push_workflow_ids"
 
     - name: Cancel Initial Workflow Runs
       shell: bash
@@ -184,7 +184,7 @@ runs:
         OWNER: ${{ inputs.owner }}
         TEMPLATE: ${{ inputs.template }}
         DELETE: ${{ inputs.delete-runs }}
-        PUSH_WORKFLOW_COUNT: ${{ steps.count-push-workflows.outputs.count }}
+        PUSH_WORKFLOW_IDS: ${{ steps.identify-push-workflows.outputs.push-workflow-ids }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
         retry() {
@@ -209,8 +209,17 @@ runs:
         list_runs() {
           gh run list \
             --repo "$OWNER/$NAME" \
-            --json event,createdAt,databaseId | \
-          jq '.[] | select( .event == "push" )' | jq -s
+            --json event,createdAt,databaseId,workflowDatabaseId | \
+          jq \
+            --argjson push_workflow_ids "$PUSH_WORKFLOW_IDS" \
+            '[
+              .[] 
+              | .workflowDatabaseId as $workflow_id
+              | select( 
+                  .event == "push" 
+                  and (any($push_workflow_ids; . == $workflow_id))
+                )
+            ]'
         }
         
         cancellations_complete() {
@@ -233,18 +242,19 @@ runs:
             "/repos/$OWNER/$NAME/actions/runs/$1"
         }
 
+        push_workflow_count=$(echo "$PUSH_WORKFLOW_IDS" | jq length)
         timeout=10
         delay=2
         cancelled=()
         now=$(date +%s)
         last_cancellation=$now
-        while [[ $now < $(($last_cancellation + $timeout)) && ${#cancelled[@]} < $PUSH_WORKFLOW_COUNT  ]]; do
+        while [[ $now < $(($last_cancellation + $timeout)) && ${#cancelled[@]} < $push_workflow_count  ]]; do
           runs=$(retry 5 list_runs)
           for (( i=0; i<$(echo "$runs" | jq length); i++ )); do
             run=$(echo "$runs" | jq --argjson i $i '.[$i]')
-            run_id=$(echo "$run" | jq -r '.databaseId')
             cancel_at=$(($(date -d "$(echo "$run" | jq -r '.createdAt')" +%s) + $delay))
             if [[ ! " ${cancelled[*]} " =~ " $run_id " && $now > $cancel_at ]]; then
+              run_id=$(echo "$run" | jq -r '.databaseId')
               retry 5 cancel_run $run_id
               cancelled+=($run_id)
               last_cancellation=$now
