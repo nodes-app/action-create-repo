@@ -212,16 +212,19 @@ runs:
             --json event,createdAt,databaseId,workflowDatabaseId | \
           jq \
             --argjson push_workflow_ids "$PUSH_WORKFLOW_IDS" \
-            '[
+            '
+            [
               .[] 
               | select( 
-                  .event == "push" 
+                  .event == "push"
                   and (
                     .workflowDatabaseId as $workflow_id
-                    | any($push_workflow_ids; . == $workflow_id)
+                    | $push_workflow_ids 
+                    | contains([$workflow_id])
                   )
                 )
-            ]'
+            ]
+            '
         }
         
         cancellations_complete() {
@@ -263,8 +266,8 @@ runs:
           runs=$(retry 5 list_runs)
           for (( i=0; i<$(echo "$runs" | jq length); i++ )); do
             run=$(echo "$runs" | jq --argjson i $i '.[$i]')
-            run_id=$(echo "$run" | jq -r '.databaseId')
-            if [[ ! "$(echo "$cancelled" | jq --argjson id "$run_id" 'any(. == $id)')" ]]; then
+            run_id=$(echo "$run" | jq '.databaseId')
+            if ! $(echo "$cancelled" | jq --argjson id "$run_id" 'any(. == $id)'); then
               if [[ $now > $(($(date -d "$(echo "$run" | jq -r '.createdAt')" +%s) + $delay)) ]]; then
                 retry 5 cancel_run $run_id
                 cancelled=$(echo "$cancelled" | jq --argjson id "$run_id" '. += [$id]')
