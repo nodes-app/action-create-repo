@@ -175,18 +175,18 @@ runs:
         all_runs_complete() {
           gh run list \
             --repo "$OWNER/$NAME" \
-            --json status,databaseId,workflowDatabaseId | \
-          jq \
-            --argjson run_ids "$1"
+            --json status,databaseId \
+          | jq \
+            --argjson run_ids "$1" \
             '
-            .[] 
-            | all(
-                select(
-                  .databaseId as $id
-                  | any($run_ids; . == $id)
-                ); 
-                .status == "completed"
-              )
+            [
+              .[]
+              | select(
+                  [.databaseId]
+                  | inside($run_ids)
+                )
+            ]
+            | all( .status == "completed" )
             '
         }
         
