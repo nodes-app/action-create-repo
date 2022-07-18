@@ -100,6 +100,7 @@ runs:
         NAME: ${{ inputs.name }}
         OWNER: ${{ inputs.owner }}
         TEMPLATE: ${{ inputs.template }}
+        WORKFLOWS: ${{ inputs.cancel-runs-workflows }}
         DELETE: ${{ inputs.delete-runs }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
