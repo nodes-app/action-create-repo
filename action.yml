@@ -37,6 +37,10 @@ inputs:
     description: Delete initial workflow runs (after cancellation)
     required: true
     default: 'true'
+  undo-initial-commit:
+    description: Clear commit history after creating repository from template (and cloning) (disabled by default)
+    required: false
+    default: 'false'
   token:
     description: GitHub personal access token
     required: true
@@ -93,15 +97,14 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
       run: git clone "https://$GITHUB_TOKEN@github.com/$OWNER/$NAME.git"
 
-    - name: Cancel Workflow Runs
-      shell: bash
+    - name: Identify Workflows
       if: inputs.template != '' && inputs.cancel-runs == 'true'
+      id: identify-workflows
+      shell: bash
       env:
         NAME: ${{ inputs.name }}
         OWNER: ${{ inputs.owner }}
-        TEMPLATE: ${{ inputs.template }}
         WORKFLOWS: ${{ inputs.cancel-runs-workflows }}
-        DELETE: ${{ inputs.delete-runs }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
         retry() {
@@ -123,7 +126,7 @@ runs:
           return 0
         }
 
-        get_selected_workflow_ids() {
+        get_workflow_ids() {}
           gh api \
             -H "Accept: application/vnd.github+json" \
             "/repos/$OWNER/$NAME/actions/workflows" \
@@ -154,13 +157,55 @@ runs:
             ) end
             '
         }
+
+        workflow_ids=$(retry 5 get_workflow_ids)
+        echo "::set-output name=workflow-ids::$workflow_ids"
+
+    - name: Undo Initial Commit
+      if: inputs.template != '' && inputs.undo-initial-commit == 'true'
+      shell: bash
+      uses: nodes-app/action-clear-commit-history@v1
+      with:
+        repository: ${{ inputs.owner }}/${{ inputs.name }}
+        recommit: false
+        token: ${{ inputs.token }}
+
+    - name: Cancel Workflow Runs
+      shell: bash
+      if: inputs.template != '' && inputs.cancel-runs == 'true'
+      env:
+        NAME: ${{ inputs.name }}
+        OWNER: ${{ inputs.owner }}
+        TEMPLATE: ${{ inputs.template }}
+        WORKFLOW_IDS: ${{ steps.identify-workflows.outputs.workflow-ids }}
+        DELETE: ${{ inputs.delete-runs }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        retry() {
+          local retries=$1
+          shift
+          local cmd="$@"
+          local i=0
+          local exit_code
+          local wait
+          until eval "$cmd"; do
+            exit_code=$?
+            i=$(($i + 1))
+            if [ $i -lt $retries ]; then
+              sleep $i
+            else
+              return $exit_code
+            fi
+          done
+          return 0
+        }
         
         list_runs() {
           gh run list \
             --repo "$OWNER/$NAME" \
             --json event,createdAt,databaseId,workflowDatabaseId,status | \
           jq \
-            --argjson workflow_ids "$1" \
+            --argjson workflow_ids "$WORKFLOW_IDS" \
             '
             [
               .[] 
@@ -201,14 +246,13 @@ runs:
             "/repos/$OWNER/$NAME/actions/runs/$1"
         }
 
-        workflow_ids=$(retry 5 get_selected_workflow_ids)
         timeout=10
         delay=2
         cancelled='[]'
         now=$(date +%s)
         last_cancellation=$now
         while [[ $now < $(($last_cancellation + $timeout)) ]]; do
-          runs=$(retry 5 list_runs "'$workflow_ids'")
+          runs=$(retry 5 list_runs)
           for (( i=0; i<$(echo "$runs" | jq length); i++ )); do
             run=$(echo "$runs" | jq --argjson i $i '.[$i]')
             run_id=$(echo "$run" | jq '.databaseId')
