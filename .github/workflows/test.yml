@@ -8,7 +8,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       
-      - name: Create Test Repository
+      - name: Create
         uses: ./
         with:
           name: action-create-repo-test
@@ -28,7 +28,7 @@ jobs:
       - name: Wait
         run: sleep 3
 
-      - name: Create Test Repository From Template
+      - name: Create From Template
         uses: ./
         with:
           name: action-create-repo-test
@@ -50,7 +50,7 @@ jobs:
       - name: Wait
         run: sleep 3
 
-      - name: Create and Clone Test Repository From Template
+      - name: Create and Clone From Template
         uses: ./
         with:
           name: action-create-repo-test
@@ -59,6 +59,30 @@ jobs:
           template: actions/javascript-action
           clone: true
           cancel-runs: true
+          token: ${{ secrets.GH_ACCESS_TOKEN }}
+
+      - name: Wait
+        run: sleep 3
+
+      - name: Delete Test Repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: |
+          gh repo delete "nodes-bot/action-create-repo-test" --confirm
+
+      - name: Wait
+        run: sleep 3
+
+      - name: Create And Clone From Template and Undo Initial Commit
+        uses: ./
+        with:
+          name: action-create-repo-test
+          owner: nodes-bot
+          description: This is a test
+          template: actions/javascript-action
+          clone: true
+          cancel-runs: true
+          undo-initial-commit: true
           token: ${{ secrets.GH_ACCESS_TOKEN }}
 
       - name: Wait
