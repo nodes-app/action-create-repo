@@ -163,7 +163,6 @@ runs:
 
     - name: Undo Initial Commit
       if: inputs.template != '' && inputs.undo-initial-commit == 'true'
-      shell: bash
       uses: nodes-app/action-clear-commit-history@v1
       with:
         repository: ${{ inputs.owner }}/${{ inputs.name }}
