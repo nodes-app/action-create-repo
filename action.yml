@@ -126,12 +126,11 @@ runs:
           return 0
         }
 
-        get_workflow_ids() {}
+        get_workflow_ids() {
           gh api \
             -H "Accept: application/vnd.github+json" \
             "/repos/$OWNER/$NAME/actions/workflows" \
           | jq \
-            -c \
             '
             if (env.WORKFLOWS == "") then (
               .workflows 
