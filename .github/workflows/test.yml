@@ -1,5 +1,6 @@
 name: Test
 on: [push, pull_request]
+concurrency: main
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -55,7 +56,6 @@ jobs:
           owner: nodes-bot
           description: This is a test
           template: actions/javascript-action
-          clone: true
           cancel-runs: true
           undo-initial-commit: true
           token: ${{ secrets.GH_ACCESS_TOKEN }}
