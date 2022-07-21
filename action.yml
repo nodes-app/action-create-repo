@@ -167,7 +167,7 @@ runs:
       uses: nodes-app/action-clear-commit-history@v1
       with:
         repository: ${{ inputs.owner }}/${{ inputs.name }}
-        recommit: false
+        keep-contents: false
         token: ${{ inputs.token }}
 
     - name: Cancel Workflow Runs
