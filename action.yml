@@ -45,6 +45,10 @@ inputs:
     description: GitHub personal access token
     required: true
     default: ${{ github.token }}
+outputs:
+  id:
+    description: ID of newly created repository
+    value: ${{ steps.create-repo.outputs.id }}
   
 runs:
   using: composite
@@ -87,6 +91,8 @@ runs:
           sleep 0.5
         done
         sleep 1
+
+        echo "::set-output name=id::$(gh repo view "$OWNER/$NAME" --json id --jq '.id')"
 
     - name: Clone Repository
       shell: bash
