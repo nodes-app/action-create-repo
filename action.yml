@@ -200,12 +200,13 @@ runs:
               [
                 .[]
                 | select(
-                    .workflowDatabaseId as $workflow_id
+                    databaseId as $run_id
+                    | .workflowDatabaseId as $workflow_id
                     | .status as $status
                     | (.createdAt | fromdateiso8601) as $created_at
                     | $status != "completed"
                       and any($workflow_ids[]; . == $workflow_id)
-                      and all($cancelled[]; . != $workflow_id)
+                      and all($cancelled[]; . != $run_id)
                       and $now > ($created_at + $cancellation_delay_seconds)
                   )
                 | .databaseId
