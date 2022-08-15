@@ -1,5 +1,5 @@
 name: Create Repository
-description: Creates and sets up a GitHub repository
+description: Creates a GitHub Repository
 branding:
   icon: plus
   color: green
@@ -11,106 +11,111 @@ inputs:
     description: Repository owner
     required: true
     default: ${{ github.repository_owner }}
+  visibility:
+    description: Repository visibility
+    required: true
+    default: private
+  token:
+    description: GitHub access token
+    required: true
+    default: ${{ github.token }}
   description:
     description: Repository description
     required: false
-  visibility:
-    description: Repository visiblity
-    required: false
-    default: private
   template:
-    description: Template repository (owner/repo)
+    description: Repository template (e.g. nodes-app/example)
     required: false
   clone:
-    description: Optionally clone the new repository
+    description: Clone the newly created repository
     required: false
     default: 'false'
   cancel-runs:
     description: Cancel initial workflow runs
     required: false
     default: 'false'
-  cancel-runs-workflows:
-    description: Optionally specify workflow names (like 'example.yml') separated by line breaks; defaults to blank which selects all workflows
+  cancel-runs-selection:
+    description: Optionally specify workflow names (like 'example.yml') separated by line breaks. Defaults to blank which selects all workflows.
     required: false
     default: ''
   delete-runs:
     description: Delete initial workflow runs (after cancellation)
-    required: true
+    required: false
     default: 'true'
   undo-initial-commit:
-    description: Clear commit history after creating repository from template (and cloning) (disabled by default)
+    description: Clear commit history immediately after creating repository from template
     required: false
     default: 'false'
-  token:
-    description: GitHub personal access token
-    required: true
-    default: ${{ github.token }}
+
 outputs:
   id:
-    description: ID of newly created repository
+    description: Repository ID
     value: ${{ steps.create-repo.outputs.id }}
-  
+
 runs:
   using: composite
   steps:
-
-    - name: Create Repository
-      id: create-repo
+    
+    - id: create-repo
       shell: bash
       env:
         NAME: ${{ inputs.name }}
         OWNER: ${{ inputs.owner }}
-        DESCRIPTION: ${{ inputs.description }}
         VISIBILITY: ${{ inputs.visibility }}
+        DESCRIPTION: ${{ inputs.description }}
         TEMPLATE: ${{ inputs.template }}
+        USE_TEMPLATE: ${{ inputs.template != "" }}
+        CLONE: ${{ inputs.clone == 'true' }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
-        is_public=$([[ "${VISIBILITY,,}" == "public" ]] && echo true || echo)
-        is_private=$([[ "${VISIBILITY,,}" != "public" ]] && echo true || echo)
+        visibility_lower_case="${VISIBILITY,,}"
+        is_public=$([ "$visibility_lower_case" = "public" ] && echo true || echo)
+        is_internal=$([ "$visibility_lower_case" = "internal" ] && echo true || echo)
+        is_private=$([ -z "$is_public" && -z "$is_internal" ] && echo true || echo)
 
         gh repo create "$OWNER/$NAME" \
           --description "$DESCRIPTION" \
           ${is_public:+--public} \
+          ${is_internal:+--internal} \
           ${is_private:+--private} \
           ${TEMPLATE:+--template "$TEMPLATE"}
           
-        if [ -z "$TEMPLATE" ]; then
-          exit 0
+        if $USE_TEMPLATE; then
+          # Wait for initial setup to complete (see https://github.com/cli/cli/issues/5118)
+          default_branch=$(
+            gh api \
+              -H "Accept: application/vnd.github.v3+json" \
+              "/repos/$TEMPLATE" | \
+              jq -r '.default_branch'
+          )
+          while ! gh api "/repos/$OWNER/$NAME/branches/$default_branch" &> /dev/null; do
+            sleep 0.5
+          done
+          sleep 1
         fi
 
-        default_branch=$(
-          gh api \
-            -H "Accept: application/vnd.github.v3+json" \
-            "/repos/$TEMPLATE" | \
-            jq -r '.default_branch'
-        )
-
-        # Wait for initial setup to complete (see https://github.com/cli/cli/issues/5118)
-        while ! gh api "/repos/$OWNER/$NAME/branches/$default_branch" &> /dev/null
-        do
-          sleep 0.5
-        done
-        sleep 1
+        if $CLONE; then
+          git clone "https://$GITHUB_TOKEN@github.com/$OWNER/$NAME.git"
+        fi
 
         echo "::set-output name=id::$(gh repo view "$OWNER/$NAME" --json id --jq '.id')"
 
-    - name: Clone Repository
-      shell: bash
-      if: inputs.clone == 'true'
-      env:
-        NAME: ${{ inputs.name }}
-        OWNER: ${{ inputs.owner }}
-        GITHUB_TOKEN: ${{ inputs.token }}
-      run: git clone "https://$GITHUB_TOKEN@github.com/$OWNER/$NAME.git"
+    - name: Undo Initial Commit
+      if: inputs.template != '' && inputs.undo-initial-commit == 'true'
+      uses: nodes-app/action-clear-commit-history@v1
+      with:
+        repository: ${{ inputs.owner }}/${{ inputs.name }}
+        keep-contents: false
+        token: ${{ inputs.token }}
 
-    - name: Identify Workflows
+    - name: Cancel Workflow Runs
       if: inputs.template != '' && inputs.cancel-runs == 'true'
-      id: identify-workflows
       shell: bash
       env:
         NAME: ${{ inputs.name }}
         OWNER: ${{ inputs.owner }}
-        WORKFLOWS: ${{ inputs.cancel-runs-workflows }}
+        CANCEL_RUNS_SELECTION: ${{ inputs.cancel-runs-selection }}
+        DELETE_RUNS: ${{ inputs.delete-runs == 'true' }}
+        UNDO_INITIAL_COMMIT: ${{ inputs.undo-initial-commit == 'true' }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
         retry() {
@@ -132,19 +137,30 @@ runs:
           return 0
         }
 
-        get_workflow_ids() {
+        cancel_run() {
+          gh run cancel "$1" --repo "$OWNER/$NAME"
+        }
+        
+        delete_run() {
+          gh api \
+            --method DELETE \
+            -H "Accept: application/vnd.github.v3+json" \
+            "/repos/$OWNER/$NAME/actions/runs/$1"
+        }
+
+        workflow_ids=$(
           gh api \
             -H "Accept: application/vnd.github+json" \
             "/repos/$OWNER/$NAME/actions/workflows" \
           | jq \
             -c \
             '
-            if (env.WORKFLOWS == "") then (
+            if (env.CANCEL_RUNS_SELECTION == "") then (
               .workflows 
               | map(.id)
             ) else (
               (
-                env.WORKFLOWS
+                env.CANCEL_RUNS_SELECTION
                 | split("\n")
                 | 
                 [
@@ -157,136 +173,99 @@ runs:
                 .workflows[]
                 | select(
                     .path
-                    | [ltrimstr(".github/workflows/")]
-                    | inside($workflow_names)
+                    | ltrimstr(".github/workflows/") as $name
+                    | any($workflow_names; . == $name)
                   ).id
               ]
             ) end
             '
-        }
+        )
 
-        workflow_ids=$(retry 5 get_workflow_ids)
-        echo "::set-output name=workflow-ids::$workflow_ids"
+        timeout_seconds=10
+        cancellation_delay_seconds=2
+        cancelled='[]'
+        last_cancellation=$(date +%s)
+        while [ $(date +%s) -lt $(($last_cancellation + $timeout_seconds)) ]; do
+          cancel_next=$(
+            gh run list \
+              --repo "$OWNER/$NAME" \
+              --json createdAt,databaseId,workflowDatabaseId,status | \
+            jq \
+              --argjson workflow_ids "$workflow_ids" \
+              --argjson cancelled "$cancelled" \
+              --argjson cancellation_delay_seconds "$cancellation_delay_seconds" \
+              '
+              now as $now
+              |
+              [
+                .[]
+                | select(
+                    .workflowDatabaseId as $workflow_id
+                    | .status as $status
+                    | (.createdAt | fromdateiso8601) as $created_at
+                    | $status != "completed"
+                      and any($workflow_ids[]; . == $workflow_id)
+                      and all($cancelled[]; . != $workflow_id)
+                      and $now > ($created_at + $cancellation_delay_seconds)
+                  )
+                | .databaseId
+              ]
+              '
+          )
+          if [ ! "$cancel_next" = '[]' ]; then
+            $(
+              echo "$cancel_next" \
+              | jq \
+                  -r \
+                  '
+                  [
+                    .[]
+                    | "retry 5 cancel_run \(.)"
+                  ]
+                  | join("; ")
+                  '
+            )
+            cancelled=$(
+              echo "$cancelled" \
+              | jq \
+                  --argjson add "$cancel_next" \
+                  '. += $cancel_next'
+            )
+            last_cancellation=$(date +%s)
+          fi
+        done
 
-    - name: Undo Initial Commit
-      if: inputs.template != '' && inputs.undo-initial-commit == 'true'
-      uses: nodes-app/action-clear-commit-history@v1
-      with:
-        repository: ${{ inputs.owner }}/${{ inputs.name }}
-        keep-contents: false
-        token: ${{ inputs.token }}
-
-    - name: Cancel Workflow Runs
-      shell: bash
-      if: inputs.template != '' && inputs.cancel-runs == 'true'
-      env:
-        NAME: ${{ inputs.name }}
-        OWNER: ${{ inputs.owner }}
-        TEMPLATE: ${{ inputs.template }}
-        WORKFLOW_IDS: ${{ steps.identify-workflows.outputs.workflow-ids }}
-        DELETE: ${{ inputs.delete-runs }}
-        GITHUB_TOKEN: ${{ inputs.token }}
-      run: |
-        retry() {
-          local retries=$1
-          shift
-          local cmd="$@"
-          local i=0
-          local exit_code
-          local wait
-          until eval "$cmd"; do
-            exit_code=$?
-            i=$(($i + 1))
-            if [ $i -lt $retries ]; then
-              sleep $i
-            else
-              return $exit_code
-            fi
-          done
-          return 0
-        }
-        
-        list_runs() {
-          gh run list \
-            --repo "$OWNER/$NAME" \
-            --json event,createdAt,databaseId,workflowDatabaseId,status | \
-          jq \
-            --argjson workflow_ids "$WORKFLOW_IDS" \
-            '
-            [
-              .[] 
-              | select( 
-                  [.workflowDatabaseId]
-                  | inside($workflow_ids)
-                )
-            ]
-            '
-        }
-        
-        all_runs_complete() {
+        while $(
           gh run list \
             --repo "$OWNER/$NAME" \
             --json status,databaseId \
           | jq \
-            --argjson run_ids "$1" \
-            '
-            [
-              .[]
-              | select(
-                  [.databaseId]
-                  | inside($run_ids)
-                )
-            ]
-            | all( .status == "completed" )
-            '
-        }
-        
-        cancel_run() {
-          gh run cancel "$1" --repo "$OWNER/$NAME"
-        }
-        
-        delete_run() {
-          gh api \
-            --method DELETE \
-            -H "Accept: application/vnd.github.v3+json" \
-            "/repos/$OWNER/$NAME/actions/runs/$1"
-        }
-
-        timeout=10
-        delay=2
-        cancelled='[]'
-        now=$(date +%s)
-        last_cancellation=$now
-        while [[ $now < $(($last_cancellation + $timeout)) ]]; do
-          runs=$(retry 5 list_runs)
-          for (( i=0; i<$(echo "$runs" | jq length); i++ )); do
-            run=$(echo "$runs" | jq --argjson i $i '.[$i]')
-            run_id=$(echo "$run" | jq '.databaseId')
-            if ! $(echo "$cancelled" | jq --argjson id "$run_id" 'any(. == $id)'); then
-              if [[ $now > $(($(date -d "$(echo "$run" | jq -r '.createdAt')" +%s) + $delay)) ]]; then
-                if [[ "$(echo "$run" | jq -r '.status')" != 'completed' ]]; then
-                  retry 5 cancel_run $run_id 
-                fi
-                cancelled=$(echo "$cancelled" | jq --argjson id "$run_id" '. += [$id]')
-                last_cancellation=$now
-              fi
-            fi
-          done
-          sleep 0.5
-          now=$(date +%s)
-        done
-        
-        cancelled=$(echo "$cancelled" | jq -c)
-        
-        # Await run completion
-        while ! $(retry 5 all_runs_complete "'$cancelled'"); do
+              --argjson cancelled "$cancelled" \
+              '
+              [
+                .[]
+                | select(
+                    .databaseId as $id
+                    | any($cancelled[]; . == $id)
+                  )
+              ]
+              | any( .status != "completed" )
+              '
+        ); do
           sleep 0.5
         done
         
-        # Delete runs
-        if $DELETE; then
-          for (( i=0; i<$(echo "$cancelled" | jq length); i++ )); do
-            run_id=$(echo "$cancelled" | jq --argjson i $i '.[$i]')
-            retry 5 delete_run $run_id
-          done
+        if $DELETE_RUNS; then
+          $(
+            echo "$cancelled" \
+            | jq \
+                -r \
+                '
+                [
+                  .[]
+                  | "retry 5 delete_run \(.)"
+                ]
+                | join("; ")
+                '
+          )
         fi
