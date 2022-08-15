@@ -229,7 +229,7 @@ runs:
               echo "$cancelled" \
               | jq \
                   --argjson add "$cancel_next" \
-                  '. += $cancel_next'
+                  '. += $add'
             )
             last_cancellation=$(date +%s)
           fi
