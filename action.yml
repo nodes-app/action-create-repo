@@ -212,6 +212,8 @@ runs:
               ]
               '
           )
+          echo "cancelled: $cancelled"
+          echo "cancel next: $cancel_next"
           if [ ! "$cancel_next" = '[]' ]; then
             $(
               echo "$cancel_next" \
