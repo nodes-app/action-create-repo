@@ -70,7 +70,7 @@ runs:
         visibility_lower_case="${VISIBILITY,,}"
         is_public=$([ "$visibility_lower_case" = "public" ] && echo true || echo)
         is_internal=$([ "$visibility_lower_case" = "internal" ] && echo true || echo)
-        is_private=$([ -z "$is_public" && -z "$is_internal" ] && echo true || echo)
+        is_private=$([ -z "$is_public$is_internal" ] && echo true || echo)
 
         gh repo create "$OWNER/$NAME" \
           --description "$DESCRIPTION" \
