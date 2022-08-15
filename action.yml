@@ -63,7 +63,7 @@ runs:
         VISIBILITY: ${{ inputs.visibility }}
         DESCRIPTION: ${{ inputs.description }}
         TEMPLATE: ${{ inputs.template }}
-        USE_TEMPLATE: ${{ inputs.template != "" }}
+        USE_TEMPLATE: ${{ inputs.template != '' }}
         CLONE: ${{ inputs.clone == 'true' }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
