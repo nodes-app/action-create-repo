@@ -223,7 +223,7 @@ runs:
                     .[]
                     | "retry 5 cancel_run \(.)"
                   ]
-                  | join("; ")
+                  | "\(join(" & ")) & wait"
                   '
             )
             cancelled=$(
@@ -266,7 +266,7 @@ runs:
                   .[]
                   | "retry 5 delete_run \(.)"
                 ]
-                | join("; ")
+                | "\(join(" & ")) & wait"
                 '
           )
         fi
